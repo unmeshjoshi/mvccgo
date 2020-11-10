@@ -69,6 +69,35 @@ type RangeResult struct {
 	Rev   int64
 	Count int
 }
+// kvsToEvents gets all events for the watchers from all key-value pairs
+func (s *Store) KvsToEvents(lg *zap.Logger, revs, vals [][]byte) (evs []mvccpb.Event) {
+	for i, v := range vals {
+		var kv mvccpb.KeyValue
+		if err := kv.Unmarshal(v); err != nil {
+			lg.Panic("failed to unmarshal mvccpb.KeyValue", zap.Error(err))
+		}
+		//
+		//if !wg.contains(string(kv.Key)) {
+		//	continue
+		//}
+
+		ty := mvccpb.PUT
+		if isTombstone(revs[i]) {
+			ty = mvccpb.DELETE
+			// patch in mod revision so watchers won't skip
+			kv.ModRevision = bytesToRev(revs[i]).main
+		}
+		evs = append(evs, mvccpb.Event{Kv: &kv, Type: ty})
+	}
+	return evs
+}
+
+
+// isTombstone checks whether the revision bytes is a tombstone.
+func isTombstone(b []byte) bool {
+	return len(b) == markedRevBytesLen && b[markBytePosition] == markTombstone
+}
+
 
 func (s *Store) RangeKeys(key, end []byte, curRev int64, ro RangeOptions) (*RangeResult, error) {
 	rev := ro.Rev
@@ -169,9 +198,7 @@ func (s *Store) Put(key, value []byte) {
 		)
 	}
 	defer tx.Commit()
-	println("Put value ", s.CurrentRev)
 	s.CurrentRev++
-
 }
 
 
